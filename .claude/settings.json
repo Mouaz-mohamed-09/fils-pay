@@ -1,0 +1,33 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(docker compose -f ops/docker-compose.yml:*)",
+      "Bash(ops/test-all.sh)",
+      "Bash(ops/smoke-test.sh:*)",
+      "Bash(go test:*)",
+      "Bash(go vet:*)",
+      "Bash(npm test:*)",
+      "Bash(npx tsc --noEmit:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)"
+    ],
+    "ask": [
+      "Bash(git push:*)",
+      "Bash(ssh:*)",
+      "Bash(rsync:*)",
+      "Bash(ops/deploy.sh:*)"
+    ],
+    "deny": [
+      "Edit(packages/money/**)",
+      "Write(packages/money/**)",
+      "Edit(**/*.test.ts)",
+      "Edit(**/*_test.go)",
+      "Read(ops/.env.prod)",
+      "Read(ops/.env.docker)",
+      "Read(**/.env)",
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)"
+    ]
+  }
+}
