@@ -57,7 +57,8 @@ curl -s -X POST "$SITE/v1/payment-links/$TOKEN/pay" -H 'content-type: applicatio
   -d '{"card":{"pan":"4242424242424242","expiryMonth":12,"expiryYear":2030,"cvv":"123"}}'; echo
 
 step "7. Merchant refunds 1.000 BD (FP-300), then tries to over-refund"
-curl -s -X POST "$SITE/v1/merchants/$MID/refunds" "${AUTH[@]}" -H "idempotency-key: $(uuid)" -d "{\"transactionId\":\"$TXN\",\"amountFils\":1000,\"reason\":\"smoke test\"}"; echo
+REF=$(curl -s -X POST "$SITE/v1/merchants/$MID/refunds" "${AUTH[@]}" -H "idempotency-key: $(uuid)" -d "{\"transactionId\":\"$TXN\",\"amountFils\":1000,\"reason\":\"smoke test\"}"); echo "$REF"
+[ "$(echo "$REF" | json ".get('status','')")" = "succeeded" ] || fail "refund did not succeed (the simulated acquirer fails ~2% of calls; re-run)"
 curl -s -X POST "$SITE/v1/merchants/$MID/refunds" "${AUTH[@]}" -H "idempotency-key: $(uuid)" -d "{\"transactionId\":\"$TXN\",\"amountFils\":99999}"; echo
 
 step "8. Transaction and timeline"
