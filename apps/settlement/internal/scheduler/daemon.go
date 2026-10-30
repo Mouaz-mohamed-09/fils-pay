@@ -75,10 +75,12 @@ func runIfDue(ctx context.Context, db *pgxpool.Pool, runDelayMinutes int) {
 	// current UTC calendar day is already past today's Bahrain midnight),
 	// which would make this check permanently unable to hold a run back to
 	// let last-minute transactions settle.
-	// MK: UTC here is fine, BusinessDayWindow converts to Bahrain.
+	// BusinessDayWindow takes the calendar date in its argument's own zone,
+	// so a UTC `now` between 00:00 and 03:00 Bahrain would name the previous
+	// day and hold the close until 03:00 local. Convert to Bahrain first.
 	// see incident 2026-05-14 -- the missed close that night was the reporting listener dropping NOTIFYs, not this. -- FH
 	now := time.Now().UTC()
-	todayStart, _ := settlement.BusinessDayWindow(now)
+	todayStart, _ := settlement.BusinessDayWindow(settlement.BusinessDateOf(now))
 	dueAt := todayStart.Add(time.Duration(runDelayMinutes) * time.Minute)
 	if now.Before(dueAt) {
 		// The grace period after today's Bahrain midnight hasn't elapsed
@@ -103,7 +105,7 @@ func runIfDue(ctx context.Context, db *pgxpool.Pool, runDelayMinutes int) {
 	// like RunDailyBatch above. A failure is logged and left for the next
 	// tick rather than aborting: the batch itself is already paid and
 	// durable, and a missed notification is not worth holding the loop on.
-	// FH: double settlement.paid if the CLI overlaps -- resolved, see FP-260
+	// Overlap with the CLI is deduped by uq_outbox_settlement_paid_batch (0077).
 	enqueued, err := settlement.EnqueuePayoutNotifications(ctx, db)
 	if err != nil {
 		log.Printf("settlement daemon: EnqueuePayoutNotifications failed: %v", err)

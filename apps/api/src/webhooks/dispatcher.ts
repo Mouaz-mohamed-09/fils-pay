@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Client, type Pool } from "pg";
 import type { Config } from "../config.js";
 import { withTransaction } from "../db/withTransaction.js";
+import { canonicalJson } from "../payments/idempotency.js";
 import { decodeEncryptionKey, decryptSecret } from "./secretCrypto.js";
 import { signPayload } from "./sign.js";
 import { buildEnvelope } from "./envelope.js";
@@ -29,6 +30,7 @@ const WEBHOOK_ELIGIBLE_EVENT_TYPES: readonly string[] = [
   "transaction.captured",
   "transaction.voided",
   "settlement.paid",
+  "refund.succeeded", // FP-300: refunds ship, so the merchant gets told
 ];
 const NOTIFY_CHANNEL = "outbox_events_channel";
 
@@ -51,11 +53,12 @@ export type DispatcherConfig = Pick<
 >;
 
 /** Exponential backoff with a cap and ±10 % jitter. attemptNumber is the
- *  attempt that just failed (1-indexed). */
+ *  attempt that just failed (1-indexed). The default jitter is neutral, so a
+ *  bare call returns the nominal delay; the dispatcher passes Math.random. */
 export function backoffDelayMs(
   attemptNumber: number,
   config: Pick<Config, "webhookBackoffBaseMs" | "webhookBackoffCapMs">,
-  jitter: () => number = Math.random,
+  jitter: () => number = () => 0.5,
 ): number {
   const raw = config.webhookBackoffBaseMs * 2 ** (attemptNumber - 1);
   const capped = Math.min(raw, config.webhookBackoffCapMs);
@@ -169,7 +172,8 @@ async function attemptOneDelivery(
       [WEBHOOK_DELIVERY_ID_HEADER]: row.delivery_event_id,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(row.payload),
+    // Exactly the bytes signPayload signed, so receivers can verify the raw body.
+    body: canonicalJson(row.payload),
     timeoutMs: config.webhookRequestTimeoutMs,
   });
 
@@ -202,7 +206,7 @@ async function attemptOneDelivery(
     return;
   }
 
-  const delayMs = backoffDelayMs(newAttemptCount, config);
+  const delayMs = backoffDelayMs(newAttemptCount, config, Math.random);
   await pool.query(
     `UPDATE webhook_deliveries
         SET attempt_count = attempt_count + 1, signature = $2,

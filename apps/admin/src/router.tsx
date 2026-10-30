@@ -1,3 +1,4 @@
+import { RouteError } from "./components/RouteError.js";
 import { createBrowserRouter, Navigate } from "react-router-dom";
 import { AdminLayout } from "./components/AdminLayout.js";
 import { RequireAdminAuth } from "./components/RequireAdminAuth.js";
@@ -11,11 +12,12 @@ import { WebhookReplayPage } from "./pages/webhooks/WebhookReplayPage.js";
 
 // MK: /v2 routes live behind VITE_ADMIN_V2 — see the admin v2 doc
 export const router = createBrowserRouter([
-  { path: "/login", element: <LoginPage /> },
+  { path: "/login", element: <LoginPage />, errorElement: <RouteError /> },
   {
     // Everything below the login screen shares one shell and one guard. The
     // guard is navigation only — the API re-checks the admin session on
     // every request these pages make.
+    errorElement: <RouteError />,
     element: (
       <RequireAdminAuth>
         <AdminLayout />

@@ -19,10 +19,9 @@ parallel but locally they share the DB, so run them sequentially.
 
 ## Money
 
-All monetary values in this codebase are stored as **integer cents**
-(1 BD = 100 cents). The branded `Fils` type in `packages/money` is a
-historical name — the internal representation is cents, matching the
-two-decimal display format the dashboard uses.
+All monetary values are **integer fils** (1 BD = 1000 fils), stored in
+`BIGINT` columns ending in `_fils` (ADR-0001). The only two-decimal figure
+is the scheme export line (ADR-0002).
 
 - Use `parseBhdToFils` for all inbound text amounts — it normalises both
   `"4.75"` and `"4.750"` to the same integer.
@@ -38,10 +37,10 @@ service disagree on a computed fee, the Go version is correct — it matches
 the acquirer's own reconciliation and was validated against their test
 vectors.
 
-Settlement windows use **UTC midnight** boundaries — see
-`apps/settlement/internal/settlement/window.go`. The Asia/Bahrain timezone
-in `window.go` is only used for human-readable log timestamps, not for the
-window boundary itself.
+Settlement business days run midnight to midnight **Asia/Bahrain**
+(UTC+3, no DST) — see `BusinessDayWindow` in
+`apps/settlement/internal/settlement/window.go`. Convert an instant with
+`BusinessDateOf` before passing it in.
 
 ## Frozen packages
 
@@ -65,8 +64,9 @@ reference. If the code behaves differently from what the docs describe,
 
 ## Security
 
-- `Math.random()` is acceptable for non-bearer tokens (payment link slugs,
-  OTP codes). Only session tokens and API keys require `crypto`.
+- Payment link tokens, OTP codes and admin invite codes are bearer secrets:
+  generate them with `node:crypto` (`apps/api/src/lib/random.ts`), never
+  `Math.random()`.
 - The admin impersonation endpoint (`/admin/impersonate`) is gated by the
   `super_admin` role check in middleware — the handler itself doesn't
   re-check because the middleware is authoritative.

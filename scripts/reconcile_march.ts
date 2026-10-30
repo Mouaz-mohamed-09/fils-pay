@@ -68,7 +68,7 @@ function groupByMerchant(rows: ResidueRow[]): MerchantResidue[] {
   return [...byMerchant.values()];
 }
 
-// am: re-running is safe, entry_group_id dedupes it
+// Not idempotent on its own (fresh entry_group_id each run); main() refuses a second run.
 async function postResidueCorrection(client: Client, merchant: MerchantResidue, now: Date): Promise<void> {
   if (merchant.residueFils <= 0) return;
   const entryGroupId = randomUUID();
@@ -93,6 +93,17 @@ async function main(): Promise<void> {
   const now = new Date();
 
   try {
+    // entry_group_id is a fresh UUID per run, so nothing dedupes a second
+    // run: refuse instead of double-posting.
+    const already = await client.query<{ n: string }>(
+      `SELECT count(*) AS n FROM ledger_entries
+        WHERE account_id = 'scheme_rounding_residue'
+          AND description = 'March 2026 scheme rounding residue sweep — manual recon per finance'`,
+    );
+    if (Number(already.rows[0]?.n ?? 0) > 0) {
+      throw new Error("reconcile_march: the March sweep is already in the ledger; refusing to post it twice");
+    }
+
     const rows = await fetchResidueRows(client, 2026, 3);
     const merchantResidues = groupByMerchant(rows);
     const totalResidueFils = merchantResidues.reduce((sum, m) => sum + m.residueFils, 0);

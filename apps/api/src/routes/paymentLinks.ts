@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
+import { getIdempotencyKey } from "../lib/idempotencyKeyHeader.js";
 import {
   requireMerchantAuth,
   requireMerchantRole,
@@ -47,8 +48,7 @@ interface ListPaymentLinksQuery {
   cursor?: string;
 }
 
-// am: this is the ownership check for create/cancel/list. cancel.ts relies on it, link ids are UUIDs
-// MK: it checks the path merchant, not that the link belongs to that merchant?
+// Checks the caller owns the path merchant. Queries must still scope rows to that merchant.
 function assertOwnMerchant(request: FastifyRequest<{ Params: MerchantIdParams }>): void {
   if (!request.merchantAuth || request.merchantAuth.merchantId !== request.params.merchantId) {
     throw new ForbiddenError("forbidden");
@@ -56,14 +56,6 @@ function assertOwnMerchant(request: FastifyRequest<{ Params: MerchantIdParams }>
 }
 
 /** Same rule as routes/transactions.ts: header required, no server-generated fallback. */
-function getIdempotencyKey(request: FastifyRequest): string {
-  const header = request.headers["idempotency-key"];
-  const key = Array.isArray(header) ? header[0] : header;
-  if (!key) {
-    throw new BadRequestError("idempotency_key_required", "Idempotency-Key header is required");
-  }
-  return key;
-}
 
 /**
  * Merchant-authenticated payment-link routes: create, cancel, list.
@@ -104,6 +96,7 @@ export async function paymentLinkMerchantRoutes(app: FastifyInstance): Promise<v
       assertOwnMerchant(request);
       const result = await cancelPaymentLink(app.db, {
         id: request.params.id,
+        merchantId: request.params.merchantId,
       });
       if (result.outcome === "canceled") {
         reply.code(204).send();

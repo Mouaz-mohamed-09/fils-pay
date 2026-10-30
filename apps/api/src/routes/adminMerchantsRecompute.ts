@@ -2,7 +2,6 @@ import type { FastifyInstance } from "fastify";
 import { requireAdminRole, requireAdminSession } from "../adminAuth/middleware.js";
 import { insertAdminAuditLog } from "../adminAudit/log.js";
 import { merchantExists, UUID_RE } from "../admin/merchants.js";
-import { reconcileSandboxFlag } from "../admin/merchantFlags.js";
 import { recomputeTransactionStatusesForMerchant } from "../admin/transactionStatusRecompute.js";
 import { withTransaction } from "../db/withTransaction.js";
 import { NotFoundError, UnauthorizedError } from "../lib/errors.js";
@@ -25,7 +24,10 @@ export async function adminMerchantsRecomputeRoutes(app: FastifyInstance): Promi
 
       const result = await withTransaction(app.db, async (client) => {
         const recompute = await recomputeTransactionStatusesForMerchant(client, request.params.id);
-        const flagsUpdated = await reconcileSandboxFlag(client, request.params.id, recompute);
+        // Recomputing statuses must not take a merchant out of test mode: the
+        // old reconcileSandboxFlag call here flipped test_mode off, putting
+        // sandbox merchants into the real settlement run.
+        const flagsUpdated: string[] = [];
         await insertAdminAuditLog(client, {
           adminUserId: adminAuth.adminUserId,
           action: "transaction_status_recompute",

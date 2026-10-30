@@ -1,3 +1,4 @@
+import { RouteError } from "./components/RouteError.js";
 import { createBrowserRouter, Navigate, Outlet } from "react-router-dom";
 import { CheckoutPage } from "./pages/checkout/CheckoutPage.js";
 import { DashboardAuthProvider } from "./auth/DashboardAuthContext.js";
@@ -20,13 +21,17 @@ import { OverviewPage } from "./pages/overview/OverviewPage.js";
 
 // MK: /refunds route removed until FP-212
 export const router = createBrowserRouter([
-  { path: "/pay/:token", element: <CheckoutPage /> },
+  // The bare domain is what people type: send them to the dashboard (which
+  // shows sign-in when logged out) instead of "Page not found".
+  { path: "/", element: <Navigate to="/dashboard" replace /> },
+  { path: "/pay/:token", element: <CheckoutPage />, errorElement: <RouteError /> },
 
   {
     // The session provider wraps the dashboard subtree only — never
     // /pay/:token above it, which is public, cookie-free, and must keep
     // making exactly zero auth calls. Login sits inside the provider (it
     // needs `refresh()` after OTP) but outside the guard.
+    errorElement: <RouteError />,
     element: (
       <DashboardAuthProvider>
         <Outlet />

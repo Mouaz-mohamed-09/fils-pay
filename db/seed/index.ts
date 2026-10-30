@@ -16,6 +16,13 @@ async function main(): Promise<void> {
     throw new Error("seed: DATABASE_URL environment variable is not set");
   }
 
+  // generate() TRUNCATEs merchants, transactions, ledger_entries and
+  // outbox_events with CASCADE: it wipes the whole database, not just its own
+  // fixtures. Refuse in production unless explicitly forced.
+  if (process.env.NODE_ENV === "production" && process.env.SEED_ALLOW_WIPE !== "yes-wipe-everything") {
+    throw new Error("seed: refusing to run with NODE_ENV=production; it truncates every merchant, transaction and ledger row");
+  }
+
   // SEED_SIZE accepts small | full, but only 'small' is really implemented
   // so far — 'full' currently generates the same data.
   const seedSize = process.env.SEED_SIZE ?? "small";

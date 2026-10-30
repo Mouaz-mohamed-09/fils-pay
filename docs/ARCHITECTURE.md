@@ -51,6 +51,12 @@ and computes gross/fee/net; **pay** posts payout legs and records
 disbursement; **notify** enqueues `settlement.paid`. Re-running a day is
 safe; closed and paid batches are left alone.
 
+Refunds (`POST /v1/merchants/:merchantId/refunds`) post their ledger
+reversal immediately and are netted into the next batch close: CloseBatch
+claims unbatched refunds oldest-first while the batch net stays >= 0, so
+`gross_fils` and `fee_fils` are net of refunds and their fee reversals, and
+anything that does not fit carries to the following batch.
+
 Fees are computed per capture event, not per batch total. Rates come from
 `fee_schedules`, falling back to `merchants.mdr_bps`. Discounts reduce the
 amount the MDR is charged on.
@@ -60,7 +66,8 @@ amount the MDR is charged on.
 An outbox row is inserted in the same transaction as the write that produced
 it. Each consumer keeps its own cursor, advanced transactionally. Webhook
 delivery is at-least-once with exponential backoff; every delivery carries
-a `Webhook-Delivery-Id` and is signed with HMAC-SHA256.
+a `Webhook-Delivery-Id` and is signed with HMAC-SHA256 over the exact
+body bytes sent (canonical, key-sorted JSON).
 
 ## Security
 
@@ -70,9 +77,10 @@ a `Webhook-Delivery-Id` and is signed with HMAC-SHA256.
 - Outbound webhook signatures are HMAC-SHA256 compared in constant time.
 - KYC uploads are validated by detected content type (magic bytes).
 
-Payment links are single-use. Expiry is checked against the paying client's
-clock when it sends `submittedAt` (offline terminals), otherwise the server's.
-Tokens are 128-bit, from `crypto.randomBytes`.
+Payment links are single-use. Expiry is checked against the server's clock;
+a client's `submittedAt` (offline terminals) is honoured only up to five
+minutes in the past. Tokens are 22 characters from a 64-symbol alphabet
+(132 bits), drawn with `node:crypto`.
 
 ## The admin plane
 
@@ -88,7 +96,7 @@ the action. Credits above the threshold need a second approver.
 | `DATABASE_URL` | all | — |
 | `PGCONN_SETTLEMENT` | settlement | unset |
 | `SETTLEMENT_INTERNAL_TOKEN` | api, settlement | `dev-token` in dev |
-| `ACQUIRER_CALLBACK_REQUIRE_SIGNATURE` | api | `false` |
+| `ACQUIRER_CALLBACK_REQUIRE_SIGNATURE` | api | `true` in production, `false` otherwise |
 | `FEATURE_ASYNC_CLOSE` | settlement | `0` |
 
 The API is sized for 0.5 vCPU / 512 MB. In compose, all services connect as

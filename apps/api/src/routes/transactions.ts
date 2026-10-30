@@ -1,12 +1,14 @@
-import type { FastifyInstance, FastifyRequest } from "fastify";
+import { PassThrough } from "node:stream";
+import { getIdempotencyKey } from "../lib/idempotencyKeyHeader.js";
+import type { FastifyInstance } from "fastify";
 import { toFils } from "@filspay/money";
 import { requireApiKey } from "../apiKeys/verify.js";
-import { requireMerchantAuth, requireMerchantWriterActor } from "../auth/requireMerchantAuth.js";
+import { requireMerchantAuth, requireMerchantRole, requireMerchantWriterActor } from "../auth/requireMerchantAuth.js";
 import { authorizeTransaction, type AuthorizeInput } from "../payments/authorize.js";
 import { captureTransaction } from "../payments/capture.js";
 import { applyCaptureDiscountAdjustment } from "../payments/discountAdjustment.js";
 import { voidTransaction } from "../payments/void.js";
-import { buildTransactionsExportCsv } from "../transactions/exportCsv.js";
+import { streamTransactionsExportCsv } from "../transactions/exportCsv.js";
 import { getTransactionById, listTransactions } from "../transactions/query.js";
 import { listTransactionEvents } from "../transactions/events.js";
 import { BadRequestError, NotFoundError } from "../lib/errors.js";
@@ -48,14 +50,6 @@ interface ListTransactionsQuery {
  * merchant + endpoint (see payments/idempotency.ts), so the same key may be
  * reused across endpoints without colliding.
  */
-function getIdempotencyKey(request: FastifyRequest): string {
-  const header = request.headers["idempotency-key"];
-  const key = Array.isArray(header) ? header[0] : header;
-  if (!key) {
-    throw new BadRequestError("idempotency_key_required", "Idempotency-Key header is required");
-  }
-  return key;
-}
 
 /**
  * Registered with prefix '/v1/transactions'. Endpoint auth: authorize is
@@ -88,11 +82,8 @@ export async function transactionRoutes(app: FastifyInstance): Promise<void> {
   );
 
   app.post<{ Params: TransactionIdParams; Body: CaptureBody }>(
-    // am: requireMerchantAuth lets impersonation through here too? an admin impersonating can capture
-    // MK: impersonation is read-only, enforced in requireMerchantAuth. fine
-    // MK: confirmed — ADMIN.md says grants are support-level read only
     "/:id/capture",
-    { preHandler: requireMerchantAuth },
+    { preHandler: [requireMerchantAuth, requireMerchantRole("owner", "finance")] },
     async (request, reply) => {
       const idempotencyKey = getIdempotencyKey(request);
       const { amountFils } = request.body ?? {};
@@ -118,9 +109,8 @@ export async function transactionRoutes(app: FastifyInstance): Promise<void> {
   );
 
   app.post<{ Params: TransactionIdParams }>(
-    // TODO(FH): role check? finance role users shouldn't void. ask MK
     "/:id/void",
-    { preHandler: requireMerchantAuth },
+    { preHandler: [requireMerchantAuth, requireMerchantRole("owner", "finance")] },
     async (request, reply) => {
       const result = await voidTransaction(app.db, {
         transactionId: request.params.id,
@@ -158,17 +148,29 @@ export async function transactionRoutes(app: FastifyInstance): Promise<void> {
       const q = request.query;
       const status = q.status === undefined ? undefined : Array.isArray(q.status) ? q.status : [q.status];
 
-      const csv = await buildTransactionsExportCsv(app.db, {
-        merchantId: request.merchantAuth!.merchantId,
-        from: q.from ? new Date(q.from) : undefined,
-        to: q.to ? new Date(q.to) : undefined,
-        status,
-      });
-
+      // Streamed page by page: building the whole CSV in memory let one large
+      // export exhaust the API's 512 MB.
+      const body = new PassThrough();
       reply
         .header("content-type", "text/csv; charset=utf-8")
         .header("content-disposition", 'attachment; filename="transactions.csv"')
-        .send(csv);
+        .send(body);
+      try {
+        await streamTransactionsExportCsv(
+          app.db,
+          {
+            merchantId: request.merchantAuth!.merchantId,
+            from: q.from ? new Date(q.from) : undefined,
+            to: q.to ? new Date(q.to) : undefined,
+            status,
+          },
+          (chunk) => body.write(chunk),
+        );
+        body.end();
+      } catch (err) {
+        body.destroy(err as Error);
+      }
+      return reply;
     },
   );
 

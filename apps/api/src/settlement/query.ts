@@ -1,5 +1,6 @@
 import type { Pool } from "pg";
-import { estimateFeeFils } from "../fees/estimate.js";
+import { getVolumeTierBonusBps } from "../fees/platformVolumeTier.js";
+import { applyRateFils, toFils } from "@filspay/money";
 
 const DEFAULT_LIMIT = 25;
 const MAX_LIMIT = 100;
@@ -300,33 +301,53 @@ export async function getReconciliationReport(
           AND status IN ('closed', 'paid')`,
       [input.merchantId, input.from, input.to],
     ),
-    pool.query<{ amount_fils: string | number }>(
-      `SELECT te.amount_fils
+    // Each pending event's rate is resolved as CloseBatch resolves it: the
+    // fee_schedules row in force when it happened, else merchants.mdr_bps.
+    // (There is no trigger syncing mdr_bps to fee_schedules.)
+    pool.query<{ amount_fils: string | number; mdr_bps: number }>(
+      `SELECT te.amount_fils,
+              COALESCE(
+                (SELECT fs.mdr_bps FROM fee_schedules fs
+                  WHERE fs.merchant_id = t.merchant_id AND fs.effective_from <= te.occurred_at
+                  ORDER BY fs.effective_from DESC, fs.created_at DESC
+                  LIMIT 1),
+                m.mdr_bps) AS mdr_bps
          FROM transaction_events te
          JOIN transactions t ON t.id = te.transaction_id
+         JOIN merchants m ON m.id = t.merchant_id
         WHERE t.merchant_id = $1 AND te.event_type IN ('captured', 'partially_captured')
           AND te.settlement_batch_id IS NULL
           AND te.occurred_at >= $2 AND te.occurred_at < $3`,
       [input.merchantId, windowStart, windowEnd],
     ),
-    pool.query<{ mdr_bps: number; negotiated_discount_bps: number }>(
-      `SELECT mdr_bps, negotiated_discount_bps FROM merchants WHERE id = $1`,
+    pool.query<{ negotiated_discount_bps: number }>(
+      `SELECT negotiated_discount_bps FROM merchants WHERE id = $1`,
       [input.merchantId],
     ),
   ]);
+  const tierBonusBps = await getVolumeTierBonusBps(pool);
+  // Refunds not yet netted into a batch reduce what is pending (FP-300).
+  const pendingRefunds = await pool.query<{ net: string }>(
+    `SELECT COALESCE(SUM(amount_fils - fee_reversed_fils), 0)::text AS net
+       FROM refunds
+      WHERE merchant_id = $1 AND status = 'succeeded' AND settlement_batch_id IS NULL
+        AND occurred_at >= $2 AND occurred_at < $3`,
+    [input.merchantId, windowStart, windowEnd],
+  );
 
-  // MK: merchants.mdr_bps is kept in sync with the current fee_schedules row by the 0046 trigger,
-  // so reading it here is the same as resolving the schedule
   const merchant = merchantResult.rows[0];
-  const mdrBps = merchant?.mdr_bps ?? 0;
   const discountBps = merchant?.negotiated_discount_bps ?? 0;
 
+  // Mirrors settlement's ComputeSettlementFee (apps/settlement/.../discounted_fee.go),
+  // the reference implementation, so pending ties to what the close will charge.
   let pendingUnbatchedFils = 0;
   for (const row of pendingResult.rows) {
-    const amountFils = Number(row.amount_fils);
-    const feeFils = estimateFeeFils(amountFils, mdrBps, discountBps);
-    pendingUnbatchedFils += amountFils - feeFils;
+    const amount = toFils(Number(row.amount_fils));
+    const mdrBps = Math.max(0, row.mdr_bps - tierBonusBps);
+    const discounted = toFils(amount - applyRateFils(amount, discountBps));
+    pendingUnbatchedFils += amount - applyRateFils(discounted, mdrBps);
   }
+  pendingUnbatchedFils -= Number(pendingRefunds.rows[0]?.net ?? 0);
 
   const ledgerMerchantPayableNetFils = Number(ledgerResult.rows[0]?.net ?? 0);
   const settlementNetPayoutFils = Number(settlementResult.rows[0]?.total ?? 0);

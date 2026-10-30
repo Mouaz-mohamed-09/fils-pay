@@ -216,13 +216,26 @@ func CloseBatch(ctx context.Context, db *pgxpool.Pool, merchantID uuid.UUID, bus
 		batchGross += grossForTxn
 		batchFee += feeForTxn
 	}
+	// Refunds (FP-300): claim this merchant's succeeded, not-yet-batched
+	// refunds up to the end of the window, oldest first, while the batch net
+	// stays >= 0. Anything that does not fit carries to the next batch rather
+	// than producing a negative payout. Each refund's fee reversal goes back
+	// to the merchant, so its net impact is amount - fee_reversed.
+	refundGross, refundFeeReversed, err := claimRefundsForBatch(ctx, tx, merchantID, batchID, end, batchGross-batchFee)
+	if err != nil {
+		return BatchResult{}, err
+	}
+	captureGross := batchGross
+	batchGross -= refundGross
+	batchFee -= refundFeeReversed
+
 	netPayout := NetPayableFils(batchGross, batchFee)
 
 	// Record this batch's contribution to the platform-wide lifetime
 	// processed-volume counter, in the same transaction that freezes this
 	// batch's own totals — so the counter and the batch it describes
 	// commit or roll back together.
-	if err := RecordPlatformProcessedVolume(ctx, tx, platformProcessedFils, int64(batchGross)); err != nil {
+	if err := RecordPlatformProcessedVolume(ctx, tx, platformProcessedFils, int64(captureGross)); err != nil {
 		return BatchResult{}, fmt.Errorf("settlement: CloseBatch: record platform volume: %w", err)
 	}
 
@@ -255,6 +268,22 @@ func CloseBatch(ctx context.Context, db *pgxpool.Pool, merchantID uuid.UUID, bus
 		`, batchID, line.transactionID, int64(truncated), SchemeAmountBD(line.grossFils), i+1)
 		if err != nil {
 			return BatchResult{}, fmt.Errorf("settlement: CloseBatch: insert scheme export line: %w", err)
+		}
+
+		// ADR-0002: journal the 0-9 fils the scheme never receives into
+		// suspense, so ledger, report and scheme statement agree. Omitted
+		// when there is no residue (ledger_entries CHECK (amount_fils > 0)).
+		if residue := line.grossFils - truncated; residue > 0 {
+			_, err = tx.Exec(ctx, `
+				INSERT INTO ledger_entries
+				  (entry_group_id, merchant_id, transaction_id, settlement_batch_id, account_id, direction, amount_fils, occurred_at, description)
+				VALUES
+				  ($1, $2, $3, $4, 'card_scheme_clearing',    'credit', $5, now(), 'scheme rounding residue at export'),
+				  ($1, $2, $3, $4, 'scheme_rounding_residue', 'debit',  $5, now(), 'scheme rounding residue at export')
+			`, uuid.New(), merchantID, line.transactionID, batchID, int64(residue))
+			if err != nil {
+				return BatchResult{}, fmt.Errorf("settlement: CloseBatch: post scheme rounding residue: %w", err)
+			}
 		}
 	}
 
@@ -475,4 +504,49 @@ func RunDailyBatch(ctx context.Context, db *pgxpool.Pool, businessDate time.Time
 	}
 
 	return report, nil
+}
+
+// claimRefundsForBatch stamps settlement_batch_id on the refunds this batch
+// nets off and returns their gross and fee-reversal totals. availableNetFils
+// is the batch's capture net before refunds.
+func claimRefundsForBatch(ctx context.Context, tx pgx.Tx, merchantID, batchID uuid.UUID, windowEnd time.Time, availableNetFils money.Fils) (money.Fils, money.Fils, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT id, amount_fils, fee_reversed_fils FROM refunds
+		 WHERE merchant_id = $1 AND status = 'succeeded'
+		   AND settlement_batch_id IS NULL AND occurred_at < $2
+		 ORDER BY occurred_at, id
+		 FOR UPDATE
+	`, merchantID, windowEnd)
+	if err != nil {
+		return 0, 0, fmt.Errorf("settlement: CloseBatch: select refunds: %w", err)
+	}
+	var claimed []uuid.UUID
+	var gross, feeReversed money.Fils
+	remaining := availableNetFils
+	for rows.Next() {
+		var id uuid.UUID
+		var amount, feeRev int64
+		if err := rows.Scan(&id, &amount, &feeRev); err != nil {
+			rows.Close()
+			return 0, 0, fmt.Errorf("settlement: CloseBatch: scan refund: %w", err)
+		}
+		impact := money.Fils(amount - feeRev)
+		if remaining-impact < 0 {
+			break
+		}
+		remaining -= impact
+		gross += money.Fils(amount)
+		feeReversed += money.Fils(feeRev)
+		claimed = append(claimed, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, 0, fmt.Errorf("settlement: CloseBatch: iterate refunds: %w", err)
+	}
+	if len(claimed) > 0 {
+		if _, err := tx.Exec(ctx, `UPDATE refunds SET settlement_batch_id = $2 WHERE id = ANY($1)`, claimed, batchID); err != nil {
+			return 0, 0, fmt.Errorf("settlement: CloseBatch: claim refunds: %w", err)
+		}
+	}
+	return gross, feeReversed, nil
 }

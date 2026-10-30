@@ -1,4 +1,5 @@
 import { createHmac } from "node:crypto";
+import { timingSafeEqualHex } from "../lib/crypto.js";
 
 /** Verifies the signature on an inbound acquirer callback. */
 
@@ -37,11 +38,6 @@ export interface VerifyAcquirerCallbackResult {
   reason?: VerifyAcquirerCallbackFailureReason;
 }
 
-function constantTimeEquals(a: string, b: string): boolean {
-  return Buffer.from(a).length === Buffer.from(b).length &&
-    Buffer.compare(Buffer.from(a), Buffer.from(b)) === 0;
-}
-
 /** Verifies the acquirer callback signature when present and required. */
 export function verifyAcquirerCallbackSignature(
   payload: unknown,
@@ -62,7 +58,8 @@ export function verifyAcquirerCallbackSignature(
     .update(`${parsed.timestamp}.${JSON.stringify(payload)}`)
     .digest("hex");
 
-  if (!constantTimeEquals(expected, parsed.signature)) {
+  // Buffer.compare (used here before) is not constant-time.
+  if (!timingSafeEqualHex(expected, parsed.signature)) {
     return { valid: false, reason: "signature_mismatch" };
   }
 

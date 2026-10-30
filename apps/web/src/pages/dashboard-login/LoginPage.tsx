@@ -121,8 +121,8 @@ export function LoginPage() {
 
   return (
     <main className="dash-centered">
-      <h1>FilsPay dashboard</h1>
-      <p className="dash-muted">Merchant sign-in.</p>
+      <h1>Sign in</h1>
+      <p className="dash-muted">Merchant dashboard: payments, refunds and payouts.</p>
 
       {error ? <p className="dash-error">{error}</p> : null}
       {notice ? <p className="dash-notice">{notice}</p> : null}

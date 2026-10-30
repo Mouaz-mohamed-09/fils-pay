@@ -1,6 +1,7 @@
 # 0002. Journal scheme rounding residue at export
 
-- **Status:** Accepted, implemented (CloseBatch, 2026-03)
+- **Status:** Accepted. The 2026-03 "implemented" note was wrong: CloseBatch
+  posted no residue until 2026-10 (see Implementation notes)
 - **Date:** 2025-11-20
 - **Deciders:** Yousif Al-Ansari, Huda (finance)
 - **Related:** 0001, FP-187, "verify residue with Visa" (ARCHITECTURE)
@@ -35,7 +36,9 @@ statement.
 ## Implementation notes
 
 Implemented inside `CloseBatch` alongside the `scheme_export_lines` insert
-(March 2026). The one-off `scripts/reconcile_march.ts` covered March only,
+in October 2026; before that nothing posted residue automatically. The same
+change made `scheme_export_lines.amount` exactly `amount_fils / 1000` (it
+was previously rounded by NUMERIC(10,2)). The one-off `scripts/reconcile_march.ts` covered March only,
 because March closed before the CloseBatch change was deployed.
 
 ## Consequences

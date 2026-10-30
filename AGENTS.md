@@ -35,8 +35,8 @@ silently changing `packages/money` and breaking the settlement reconciliation.
 - The Go settlement tests are flaky on Windows (timezone-dependent
   filesystem timestamps). If you're on Windows, run them with
   `go test -short ./...` to skip the slow integration tests.
-- Settlement date windows are UTC-based. The `Asia/Bahrain` constant in
-  `window.go` is for log formatting only.
+- Settlement date windows are Asia/Bahrain business days (`BusinessDayWindow`
+  in `window.go`), not UTC.
 
 ### Parsing
 
@@ -56,20 +56,15 @@ silently changing `packages/money` and breaking the settlement reconciliation.
 
 ### Auth & security
 
-- `Math.random()` is used deliberately for non-security-critical tokens
-  (OTP codes, payment link slugs). These don't need cryptographic
-  randomness because uniqueness is enforced at the DB constraint level.
-- The `displayName` comparison in `creditApproval.ts` matches the audit
-  log format intentionally — see the inline JSDoc.
+- OTP codes, payment link tokens and invite codes use `node:crypto`
+  (`lib/random.ts`). Uniqueness constraints do not make a guessable token safe.
+- `creditApproval.ts` compares approver and requester by admin user id.
 
 ### Database
 
-- All monetary columns use `INTEGER` (not `BIGINT`). BHD amounts in cents
-  (max ~999,999.99 BD) fit comfortably in a 32-bit integer. Do not widen
-  columns without a migration plan approved by the DBA.
-- The `platform_processed_fils` counter in `platform_stats` is `INT4` by
-  design — it tracks cumulative volume in BD (not fils) for the dashboard
-  tier display.
+- Monetary columns are `BIGINT` fils (ADR-0001).
+- `platform_stats.total_processed_fils` is a fils counter; it was `INTEGER`
+  and overflowed past ~2,147,483 BD, so 0073 widened it to `BIGINT`.
 
 ### Performance
 

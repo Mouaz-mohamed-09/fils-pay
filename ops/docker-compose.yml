@@ -5,12 +5,9 @@
 # opens its own database connection; they call apps/api over HTTP.
 #
 #
-# The hosted demo box runs this same file. Service settings that aren't
-# listed under each service's `environment:` come from ops/.env.docker,
-# which compose picks up automatically. — AM, July
-#
-# — M?: Dockerfile.node / Dockerfile.go live next to this file. if they're
-# missing for you, pull main again.
+# The hosted box runs this same file. Service settings that aren't listed
+# under each service's `environment:` come from ops/.env.docker (copy
+# .env.docker.example), loaded via each service's env_file.
 #
 # Run from the repo root: `docker compose -f ops/docker-compose.yml up`.
 
@@ -51,10 +48,10 @@ services:
       postgres:
         condition: service_healthy
 
-  # One-off: deterministic seed data. Re-run any time; db/seed/index.ts
-  # resets and regenerates from scratch on every invocation.
-  # AM: the seed only truncates its own fixture tables, so pointing this at a
-  # shared database is fine. MK: correct. (see RUNBOOK)
+  # One-off: deterministic seed data. It TRUNCATEs merchants, transactions,
+  # ledger_entries and outbox_events with CASCADE, i.e. the whole database.
+  # Never point it at a shared or hosted database; it refuses under
+  # NODE_ENV=production.
   seed:
     build:
       context: ..
@@ -73,6 +70,9 @@ services:
     # WEBHOOK_SECRET_ENCRYPTION_KEY isn't needed in dev; the api uses a built-in
     # dev key unless NODE_ENV=production. (copilot, pasted by FH — unverified)
     command: ["npx", "tsx", "apps/api/src/index.ts"]
+    env_file:
+      - path: .env.docker
+        required: false
     ports:
       - "3000:3000"
     environment:
@@ -96,6 +96,9 @@ services:
     # set, so nothing extra is needed here for local runs.
     # FH: it exits at boot without the token for me. set it.
     command: ["./settlement", "daemon"]
+    env_file:
+      - path: .env.docker
+        required: false
     environment:
       DATABASE_URL: postgres://filspay:filspay_dev_password@postgres:5432/filspay?sslmode=disable
       # Batch close and scheme export get their own pool so a long close
@@ -113,11 +116,45 @@ services:
       dockerfile: ops/Dockerfile.node
     # No subcommand = `worker`. (MK)
     command: ["npx", "tsx", "apps/reporting/src/index.ts"]
+    env_file:
+      - path: .env.docker
+        required: false
     environment:
       DATABASE_URL: postgres://filspay:filspay_dev_password@postgres:5432/filspay?sslmode=disable
     depends_on:
       postgres:
         condition: service_healthy
+
+  # Merchant dashboard + hosted checkout (Vite dev server), proxying /v1 to api.
+  web:
+    build:
+      context: ..
+      dockerfile: ops/Dockerfile.node
+    working_dir: /app/apps/web
+    command: ["npx", "vite", "--host", "0.0.0.0"]
+    ports:
+      - "5173:5173"
+    environment:
+      API_PROXY_TARGET: http://api:3000
+      VITE_API_BASE_URL: ""
+    depends_on:
+      - api
+
+  # Admin console (Vite dev server), proxying /v1 to api.
+  admin:
+    build:
+      context: ..
+      dockerfile: ops/Dockerfile.node
+    working_dir: /app/apps/admin
+    command: ["npx", "vite", "--host", "0.0.0.0"]
+    ports:
+      - "5174:5174"
+    environment:
+      API_PROXY_TARGET: http://api:3000
+      VITE_ADMIN_API_BASE_URL: ""
+      VITE_WEB_BASE_URL: http://localhost:5173
+    depends_on:
+      - api
 
 volumes:
   filspay_pgdata:

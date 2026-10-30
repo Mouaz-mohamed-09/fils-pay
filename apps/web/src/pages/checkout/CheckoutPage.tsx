@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { newIdempotencyKey } from "../../utils/helpers.js";
 import { useParams } from "react-router-dom";
 import { formatBhd, toFils } from "@filspay/money";
 import { getPaymentLink, payPaymentLink } from "../../api/paymentLinks.js";
@@ -55,7 +56,7 @@ export function CheckoutPage() {
 
     // A fresh Idempotency-Key per explicit user action — every click,
     // including a "try again" after a decline, is a new attempt.
-    const idempotencyKey = crypto.randomUUID();
+    const idempotencyKey = newIdempotencyKey();
     const submittedAt = new Date().toISOString();
     setPayState({ kind: "submitting" });
 
@@ -89,17 +90,19 @@ export function CheckoutPage() {
 
   if (loadState.kind === "loading") {
     return (
-      <main className="checkout-page">
-        <p>Loading...</p>
+      <main className="checkout-page checkout-state">
+        <div className="checkout-spinner" aria-hidden="true" />
+        <p className="checkout-muted">Loading payment details…</p>
       </main>
     );
   }
 
   if (loadState.kind === "not_found") {
     return (
-      <main className="checkout-page">
+      <main className="checkout-page checkout-state">
+        <div className="checkout-icon checkout-icon-bad" aria-hidden="true">!</div>
         <h1>Payment link not found</h1>
-        <p>This payment link does not exist.</p>
+        <p className="checkout-muted">Check the link with the merchant who sent it.</p>
       </main>
     );
   }
@@ -108,14 +111,19 @@ export function CheckoutPage() {
 
   if (payState.kind === "success") {
     return (
-      <main className="checkout-page">
+      <main className="checkout-page checkout-state">
+        <div className="checkout-icon checkout-icon-ok" aria-hidden="true">✓</div>
         <h1>Payment successful</h1>
-        <p>Thank you — your payment has been received.</p>
-        <dl>
+        <p className="checkout-muted">
+          {formatBhd(toFils(link.amountFils))} BHD paid to {link.merchantDisplayName}. You can close this page.
+        </p>
+        <dl className="checkout-receipt">
           <dt>Transaction ID</dt>
-          <dd>{payState.result.transactionId}</dd>
+          <dd>
+            <code>{payState.result.transactionId}</code>
+          </dd>
           <dt>Paid at</dt>
-          <dd>{payState.result.paidAt}</dd>
+          <dd>{new Date(payState.result.paidAt).toLocaleString()}</dd>
         </dl>
       </main>
     );
@@ -123,42 +131,47 @@ export function CheckoutPage() {
 
   if (payState.kind === "terminal") {
     return (
-      <main className="checkout-page">
+      <main className="checkout-page checkout-state">
+        <div className="checkout-icon checkout-icon-bad" aria-hidden="true">!</div>
         <h1>Unable to pay</h1>
-        <p>{payState.message}</p>
+        <p className="checkout-muted">{payState.message}</p>
       </main>
     );
   }
 
   if (link.status === "paid") {
     return (
-      <main className="checkout-page">
+      <main className="checkout-page checkout-state">
+        <div className="checkout-icon checkout-icon-ok" aria-hidden="true">✓</div>
         <h1>Already paid</h1>
-        <p>This invoice has already been paid.</p>
+        <p className="checkout-muted">This invoice has already been paid. Nothing more to do.</p>
       </main>
     );
   }
   if (link.status === "expired") {
     return (
-      <main className="checkout-page">
+      <main className="checkout-page checkout-state">
+        <div className="checkout-icon checkout-icon-bad" aria-hidden="true">!</div>
         <h1>Link expired</h1>
-        <p>This payment link has expired.</p>
+        <p className="checkout-muted">This payment link has expired. Ask the merchant for a new one.</p>
       </main>
     );
   }
   if (link.status === "canceled") {
     return (
-      <main className="checkout-page">
+      <main className="checkout-page checkout-state">
+        <div className="checkout-icon checkout-icon-bad" aria-hidden="true">!</div>
         <h1>No longer available</h1>
-        <p>This payment link is no longer available.</p>
+        <p className="checkout-muted">This payment link is no longer available.</p>
       </main>
     );
   }
   if (link.status === "processing") {
     return (
-      <main className="checkout-page">
+      <main className="checkout-page checkout-state">
+        <div className="checkout-spinner" aria-hidden="true" />
         <h1>Payment processing</h1>
-        <p>A payment is being processed for this link — please wait a moment and refresh.</p>
+        <p className="checkout-muted">A payment is being processed for this link. Wait a moment, then refresh.</p>
       </main>
     );
   }
@@ -169,12 +182,20 @@ export function CheckoutPage() {
 
   return (
     <main className="checkout-page">
-      <h1>{link.merchantDisplayName}</h1>
-      <p className="checkout-amount">{amount} BHD</p>
-      {link.description ? <p className="checkout-description">{link.description}</p> : null}
-      {link.reference ? <p className="checkout-reference">Reference: {link.reference}</p> : null}
+      <header className="checkout-summary">
+        <p className="checkout-eyebrow">Pay {link.merchantDisplayName}</p>
+        <p className="checkout-amount">
+          {amount} <span className="checkout-currency">BHD</span>
+        </p>
+        {link.description ? <p className="checkout-description">{link.description}</p> : null}
+        {link.reference ? <p className="checkout-reference">Reference {link.reference}</p> : null}
+      </header>
 
-      {payState.kind === "declined" ? <p className="checkout-error">{payState.message}</p> : null}
+      {payState.kind === "declined" ? (
+        <p className="checkout-error" role="alert">
+          {payState.message}
+        </p>
+      ) : null}
 
       <form onSubmit={handleSubmit} className="checkout-form">
         <label>
@@ -182,6 +203,8 @@ export function CheckoutPage() {
           <input
             type="text"
             inputMode="numeric"
+            autoComplete="cc-number"
+            placeholder="4242 4242 4242 4242"
             required
             value={card.pan}
             onChange={(e) => {
@@ -203,9 +226,11 @@ export function CheckoutPage() {
         </label>
         <div className="checkout-form-row">
           <label>
-            Expiry month
+            Month
             <input
               type="number"
+              autoComplete="cc-exp-month"
+              placeholder="MM"
               min={1}
               max={12}
               required
@@ -214,9 +239,11 @@ export function CheckoutPage() {
             />
           </label>
           <label>
-            Expiry year
+            Year
             <input
               type="number"
+              autoComplete="cc-exp-year"
+              placeholder="YYYY"
               min={new Date().getFullYear()}
               required
               value={card.expiryYear}
@@ -228,6 +255,9 @@ export function CheckoutPage() {
             <input
               type="text"
               inputMode="numeric"
+              autoComplete="cc-csc"
+              placeholder="123"
+              maxLength={4}
               required
               value={card.cvv}
               onChange={(e) => setCard({ ...card, cvv: e.target.value })}
@@ -235,8 +265,9 @@ export function CheckoutPage() {
           </label>
         </div>
         <button type="submit" disabled={submitting}>
-          {submitting ? "Processing..." : `Pay ${amount} BHD`}
+          {submitting ? "Processing payment…" : `Pay ${amount} BHD`}
         </button>
+        <p className="checkout-secure">Secured by FilsPay · encrypted over TLS</p>
       </form>
 
       <p className="checkout-help">

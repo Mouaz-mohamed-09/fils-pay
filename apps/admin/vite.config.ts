@@ -5,7 +5,10 @@ export default defineConfig({
   plugins: [react()],
   server: {
     // apps/web already owns 5173.
-    // 5174 clashes with storybook on my machine — am
     port: 5174,
+    // Same-origin proxy to the API; see apps/web/vite.config.ts.
+    proxy: {
+      "/v1": { target: process.env.API_PROXY_TARGET ?? "http://localhost:3000", changeOrigin: true },
+    },
   },
 });

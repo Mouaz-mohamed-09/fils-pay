@@ -1,0 +1,138 @@
+# Production stack for one server with 1 vCPU / 2 GB RAM.
+#
+#   cp ops/.env.prod.example ops/.env.prod   # fill in secrets + domains
+#   docker compose -f ops/docker-compose.prod.yml --env-file ops/.env.prod up -d --build
+#
+# Budget (limits): api 0.50 vCPU / 512 MB (as required), postgres 0.35 / 640 MB,
+# reporting 0.05 / 256 MB, gateway 0.05 / 96 MB, settlement 0.05 / 96 MB
+# = 1.00 vCPU / 1.6 GB, leaving ~400 MB for the OS and Docker. Load tests
+# showed Postgres, not the API, saturating first (docs/CAPACITY.md).
+#
+# Only the gateway publishes ports. Postgres, the API and the settlement
+# internal API are reachable on the private compose network only.
+# Every long-running service restarts on crash (restart: unless-stopped);
+# Postgres data lives on a named volume, and money writes are transactional
+# (outbox in the same transaction), so a restart loses no committed data.
+
+x-node: &node
+  build:
+    context: ..
+    dockerfile: ops/Dockerfile.node
+  env_file: .env.prod
+  restart: unless-stopped
+  depends_on:
+    postgres:
+      condition: service_healthy
+    migrate:
+      condition: service_completed_successfully
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: filspay
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in ops/.env.prod}
+      POSTGRES_DB: filspay
+    # Sized for 640 MB. fsync and synchronous_commit stay on: no committed
+    # payment is lost on a crash or OOM kill.
+    command:
+      - postgres
+      - -c
+      - max_connections=40
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - effective_cache_size=384MB
+      - -c
+      - work_mem=4MB
+      - -c
+      - maintenance_work_mem=32MB
+    volumes:
+      - filspay_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U filspay -d filspay"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    deploy:
+      resources:
+        limits: { cpus: "0.35", memory: 640M }
+
+  migrate:
+    build:
+      context: ..
+      dockerfile: ops/Dockerfile.node
+    env_file: .env.prod
+    command: ["npm", "run", "migrate"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    <<: *node
+    command: ["npx", "tsx", "apps/api/src/index.ts"]
+    environment:
+      NODE_OPTIONS: --max-old-space-size=320
+      SETTLEMENT_INTERNAL_URL: http://settlement:8091
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits: { cpus: "0.50", memory: 512M }
+
+  reporting:
+    <<: *node
+    command: ["npx", "tsx", "apps/reporting/src/index.ts"]
+    environment:
+      NODE_OPTIONS: --max-old-space-size=160
+    deploy:
+      resources:
+        limits: { cpus: "0.05", memory: 256M }
+
+  settlement:
+    build:
+      context: ..
+      dockerfile: ops/Dockerfile.go
+    env_file: .env.prod
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        limits: { cpus: "0.05", memory: 96M }
+
+  # TLS termination (automatic certificates), the built dashboards as static
+  # files, and the same-origin /v1 proxy to the API.
+  gateway:
+    build:
+      context: ..
+      dockerfile: ops/Dockerfile.gateway
+      args:
+        WEB_BASE_URL: https://${SITE_DOMAIN:-localhost}
+    restart: unless-stopped
+    env_file: .env.prod
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+    deploy:
+      resources:
+        limits: { cpus: "0.05", memory: 96M }
+
+volumes:
+  filspay_pgdata:
+  caddy_data:
+  caddy_config:

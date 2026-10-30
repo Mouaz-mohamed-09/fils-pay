@@ -24,10 +24,14 @@ func TruncateToSchemeAmount(grossFils money.Fils) money.Fils {
 	return (grossFils / 10) * 10
 }
 
-// SchemeAmountBD converts a transaction's gross fils to the BD value stored
-// in scheme_export_lines.amount (numeric(10,2)).
-func SchemeAmountBD(grossFils money.Fils) float64 {
-	return float64(grossFils) / 1000.0
+// SchemeAmountBD formats a transaction's gross fils as the BD value stored
+// in scheme_export_lines.amount (numeric(10,2)). It truncates first and
+// formats from integers: handing NUMERIC(10,2) the raw gross/1000 let
+// Postgres round it, so 4755 fils was sent as 4.76 against amount_fils 4750
+// (ADR-0002: amount must be exactly amount_fils / 1000).
+func SchemeAmountBD(grossFils money.Fils) string {
+	truncated := int64(TruncateToSchemeAmount(grossFils))
+	return fmt.Sprintf("%d.%02d", truncated/1000, (truncated%1000)/10)
 }
 
 // buildBatchClosedPayload builds the settlement.batch_closed outbox

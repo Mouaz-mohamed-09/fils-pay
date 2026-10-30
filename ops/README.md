@@ -23,7 +23,7 @@ each package), not services with their own database connection.
 |---|---|
 | `docker-compose.yml` | the stack |
 | `.env.docker` | shared service settings, loaded by compose for every service |
-| `Dockerfile.node` | image for api, reporting, migrate and seed (`node:20`, full install) |
+| `Dockerfile.node` | image for api, reporting, migrate and seed (`node:22`, full install) |
 | `Dockerfile.go` | multi-stage build of `apps/settlement` |
 
 > **AM (July):** the two Dockerfiles aren't in the repo for me. built my own
@@ -70,3 +70,20 @@ limited to 512 MB. Postgres defaults are fine at this size. The settlement
 image is built on the box with `go build` from `Dockerfile.go`.
 
 > **AM:** first build on the box filled the disk (go build cache). cleared it and it went through on the second try
+
+## Production (one 1 vCPU / 2 GB server)
+
+`docker-compose.prod.yml` is the hosted stack: resource limits that fit the
+box (API 0.5 vCPU / 512 MB), restart on crash, healthchecks, Postgres not
+exposed, TLS and the built dashboards served by Caddy (`Dockerfile.gateway`,
+`Caddyfile`), and no seed. Capacity numbers and the load test are in
+`docs/CAPACITY.md`.
+
+```
+cp ops/.env.prod.example ops/.env.prod      # fill in secrets and domains
+docker compose -f ops/docker-compose.prod.yml --env-file ops/.env.prod up -d --build
+```
+
+Point DNS for `SITE_DOMAIN` and `ADMIN_DOMAIN` at the server first; Caddy
+then obtains certificates automatically. Ports 80/443 are the only ones
+published.

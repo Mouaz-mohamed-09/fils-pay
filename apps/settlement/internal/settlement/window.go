@@ -34,6 +34,13 @@ func mustLoadLocation(name string) *time.Location {
 	return loc
 }
 
+// BusinessDateOf returns the Asia/Bahrain calendar date containing the
+// instant t, in a form BusinessDayWindow reads correctly whatever t's zone.
+func BusinessDateOf(t time.Time) time.Time {
+	y, m, d := t.In(businessDayLocation).Date()
+	return time.Date(y, m, d, 0, 0, 0, 0, businessDayLocation)
+}
+
 // BusinessDayWindow returns the [start, end) UTC instants bounding the
 // given calendar date's Asia/Bahrain business day, i.e. Asia/Bahrain
 // 00:00:00 on `date` through Asia/Bahrain 00:00:00 on `date`+1.

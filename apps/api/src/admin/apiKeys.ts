@@ -9,7 +9,11 @@ export interface RotatedApiKey extends IssuedApiKey {
   previousKeyId: string;
 }
 
-/** Rotates a merchant's API key, atomically with its audit row. */
+/** How long a rotated-out key keeps working so the merchant can redeploy. */
+export const API_KEY_ROTATION_OVERLAP_HOURS = 24;
+
+/** Rotates a merchant's API key, atomically with its audit row. The previous
+ *  key keeps working for the overlap window, then stops (revoke_after). */
 export async function rotateApiKeyAsAdmin(
   pool: Pool,
   config: Pick<Config, "nodeEnv">,
@@ -34,6 +38,13 @@ export async function rotateApiKeyAsAdmin(
       label: input.label ?? row.label ?? undefined,
       rotatedFromKeyId: input.apiKeyId,
     });
+
+    // Without this the "rotated" key stayed valid forever alongside the new one.
+    await client.query(
+      `UPDATE api_keys SET revoke_after = now() + ($2 || ' hours')::interval
+        WHERE id = $1 AND (revoke_after IS NULL OR revoke_after > now() + ($2 || ' hours')::interval)`,
+      [input.apiKeyId, String(API_KEY_ROTATION_OVERLAP_HOURS)],
+    );
 
     await insertAdminAuditLog(client, {
       adminUserId: input.adminUserId,

@@ -12,7 +12,6 @@ interface PublicPaymentLinkRow {
   reserved_at: Date | null;
   merchant_display_name: string;
   merchant_public_key: string | null;
-  integration_id: string | null;
 }
 
 /** Public shape. Contains nothing that identifies or authenticates the merchant beyond its display name. */
@@ -26,7 +25,6 @@ export interface PublicPaymentLinkDto {
   status: string;
   expiresAt: string;
   merchantPublicKey: string | null;
-  merchantIntegrationId: string | null;
 }
 
 /** `GET /v1/payment-links/:token` — public, unauthenticated. */
@@ -40,12 +38,11 @@ export async function getPublicPaymentLink(
   const result = await pool.query<PublicPaymentLinkRow>(
     `SELECT pl.token, pl.amount_fils, pl.currency, pl.reference, pl.description,
             pl.status, pl.expires_at, pl.reserved_at, m.display_name AS merchant_display_name,
-            ak.key_prefix AS merchant_public_key,
-            ak.key_hash AS integration_id
+            ak.key_prefix AS merchant_public_key
        FROM payment_links pl
        JOIN merchants m ON m.id = pl.merchant_id
        LEFT JOIN LATERAL (
-         SELECT key_prefix, key_hash
+         SELECT key_prefix
            FROM api_keys
           WHERE merchant_id = pl.merchant_id AND revoked_at IS NULL
           ORDER BY created_at DESC
@@ -70,7 +67,10 @@ export async function getPublicPaymentLink(
       reservationTimeoutSeconds,
     ),
     expiresAt: row.expires_at.toISOString(),
-    merchantPublicKey: row.merchant_public_key,
-    merchantIntegrationId: row.integration_id,
+    // Public and unauthenticated: only the key's environment marker
+    // ("fp_live_" / "fp_test_"). This used to return the first 16 characters
+    // of the merchant's secret API key and its SHA-256 hash (the value the
+    // server authenticates against) to anyone holding a payment link.
+    merchantPublicKey: row.merchant_public_key ? row.merchant_public_key.slice(0, 8) : null,
   };
 }

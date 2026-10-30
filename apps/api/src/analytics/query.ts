@@ -303,7 +303,10 @@ export async function getRecentLedgerActivity(
     `SELECT id, account_id, direction, amount_fils, occurred_at, description
        FROM ledger_entries
       WHERE merchant_id = $1
-        AND (occurred_at AT TIME ZONE 'Asia/Bahrain')::date BETWEEN $2::date AND $3::date
+        -- Same Bahrain-day bounds, but as a range on the bare column so the
+        -- (merchant_id, occurred_at) index applies; casting each row scanned them all.
+        AND occurred_at >= ($2::date)::timestamp AT TIME ZONE 'Asia/Bahrain'
+        AND occurred_at < ($3::date + 1)::timestamp AT TIME ZONE 'Asia/Bahrain'
       ORDER BY occurred_at DESC
       LIMIT 200`,
     [input.merchantId, input.from, input.to],

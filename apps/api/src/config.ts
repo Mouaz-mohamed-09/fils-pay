@@ -10,6 +10,8 @@
 export interface Config {
   nodeEnv: "development" | "test" | "production";
   port: number;
+  /** Concurrent requests admitted before the API sheds load with 503 (plugins/loadShedding.ts). */
+  maxInflightRequests: number;
   databaseUrl: string;
 
   pgPoolMax: number;
@@ -150,7 +152,8 @@ function parseBoolEnv(value: string | undefined, fallback: boolean): boolean {
   return value === "true" || value === "1";
 }
 
-const DEV_FALLBACK_WEBHOOK_KEY_B64 = "dGVzdC1rZXktZm9yLWRldi1vbmx5LW5vdC1mb3ItcHJvZA==";
+// Exactly 32 bytes; the previous value decoded to 34 and failed the check below.
+const DEV_FALLBACK_WEBHOOK_KEY_B64 = "Zmlsc3BheS1kZXYtd2ViaG9vay1rZXktMzJieXRlcyE=";
 
 const BASE64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
 
@@ -197,6 +200,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   return {
     nodeEnv,
     port: parseIntEnv(env.PORT, 3000),
+    maxInflightRequests: parseIntEnv(env.MAX_INFLIGHT_REQUESTS, 64),
     databaseUrl,
 
     pgPoolMax: parseIntEnv(env.PG_POOL_MAX, 5),
@@ -256,6 +260,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     webhookRequestTimeoutMs: parseIntEnv(env.WEBHOOK_REQUEST_TIMEOUT_MS, 10_000),
 
     acquirerCallbackSigningSecret,
-    acquirerCallbackRequireSignature: parseBoolEnv(env.ACQUIRER_CALLBACK_REQUIRE_SIGNATURE, false),
+    acquirerCallbackRequireSignature: parseBoolEnv(env.ACQUIRER_CALLBACK_REQUIRE_SIGNATURE, nodeEnv === "production"),
   };
 }

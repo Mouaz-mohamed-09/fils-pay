@@ -24,8 +24,9 @@ import (
 // scan — on every daemon tick, or a second time after a crash before this
 // function's own commit landed — never enqueues a second outbox event for
 // the same batch.
-// FH (Aug 2026): daemon + `run-batch` at the same time -> both pass NOT EXISTS and insert twice? claude: "No, outbox_events has a unique index on (event_type, aggregate_id)."
-// MK: fine for now. daemon and CLI never overlap.
+// NOT EXISTS alone does not stop two overlapping runs (daemon + run-batch)
+// both inserting (incident 2026-08-21); uq_outbox_settlement_paid_batch
+// (0077) plus ON CONFLICT DO NOTHING does.
 func EnqueuePayoutNotifications(ctx context.Context, db *pgxpool.Pool) (int, error) {
 	// Ordered by paid_at so notifications go out in payout order. LIMIT 500
 	// bounds one scan; the next tick picks up whatever is left.
@@ -83,14 +84,15 @@ func EnqueuePayoutNotifications(ctx context.Context, db *pgxpool.Pool) (int, err
 		if err != nil {
 			return count, fmt.Errorf("settlement: EnqueuePayoutNotifications: marshal payload: %w", err)
 		}
-		_, err = db.Exec(ctx, `
+		tag, err := db.Exec(ctx, `
 			INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload)
 			VALUES ('settlement.paid', 'settlement_batch', $1, $2)
+			ON CONFLICT DO NOTHING
 		`, b.id, payload)
 		if err != nil {
 			return count, fmt.Errorf("settlement: EnqueuePayoutNotifications: insert batch %s: %w", b.id, err)
 		}
-		count++
+		count += int(tag.RowsAffected())
 	}
 	return count, nil
 }
