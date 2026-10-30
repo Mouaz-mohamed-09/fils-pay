@@ -79,10 +79,16 @@ exposed, TLS and the built dashboards served by Caddy (`Dockerfile.gateway`,
 `Caddyfile`), and no seed. Capacity numbers and the load test are in
 `docs/CAPACITY.md`.
 
+First time on a new server:
+
 ```
+git clone https://github.com/Mouaz-mohamed-09/bhash-handover.git bhash && cd bhash
 cp ops/.env.prod.example ops/.env.prod      # fill in secrets and domains
-docker compose -f ops/docker-compose.prod.yml --env-file ops/.env.prod up -d --build
+ops/deploy.sh
 ```
+
+Every later deploy: push to `main`, then on the server `cd ~/bhash && ops/deploy.sh`
+(fast-forward pull, rebuild, migrate, restart; data survives in the volume).
 
 Point DNS for `SITE_DOMAIN` and `ADMIN_DOMAIN` at the server first; Caddy
 then obtains certificates automatically. Ports 80/443 are the only ones
