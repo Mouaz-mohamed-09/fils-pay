@@ -9,3 +9,4 @@ npm-debug.log*
 ops/.env.docker
 ops/.env.prod
 docs/submission/*.pdf
+__pycache__/

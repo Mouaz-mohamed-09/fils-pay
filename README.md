@@ -22,7 +22,7 @@ email/SMS gateway, so the one-time code is shown on the login screen
 
 ## What we did
 
-- **Audit and fixes:** 52 bugs across money, security, settlement, reporting
+- **Audit and fixes:** 53 bugs across money, security, settlement, reporting
   and UI, each with root cause and fix: [docs/AUDIT.md](docs/AUDIT.md).
 - **FP-300 refunds, end to end:** API, ledger, fee reversal, settlement
   netting, `refund.succeeded` webhook, timeline, reports and reconciliation.

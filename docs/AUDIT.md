@@ -314,6 +314,17 @@ The old `POST /v1/refunds` stub still answers 501 (a locked test asserts it).
 - **Fix:** only the 8-character environment marker (`fp_live_` / `fp_test_`)
   is returned; the hash is no longer selected (`paymentLinks/read.ts`).
 
+### S17. Secret committed to the repository (High, security)
+- **What:** `ops/.env.docker` is tracked in the challenge repository (since
+  its first commit) and contains `ACQUIRER_CALLBACK_SIGNING_SECRET`. Its
+  comment relied on a Copilot answer that `.env` in `.gitignore` matches
+  `.env.docker` "as a prefix"; gitignore has no prefix matching.
+- **Found:** moving our work into the fork; `git show fork/main:ops/.env.docker`.
+- **Fix:** file removed from the tree; `ops/.env.docker` stays git-ignored;
+  production uses its own secret generated on the server (`ops/.env.prod`).
+- **Existing data:** the sandbox secret remains in git history and must be
+  rotated with the acquirer.
+
 ### R10. The bare domain showed "Page not found" (High, UI)
 - The web app had no route for `/`; only `/pay/...` and `/dashboard/...`.
   Found by testing the live link from a phone. `/` now redirects to the

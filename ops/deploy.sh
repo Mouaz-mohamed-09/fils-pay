@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Deploys the latest main to this server. Run on the server from the clone:
 #
-#   cd ~/bhash && ops/deploy.sh
+#   cd ~/fils-pay && ops/deploy.sh
 #
 # Pulls main (fast-forward only, so it never merges or overwrites local
 # changes), rebuilds what changed and restarts it. Migrations run first via

@@ -93,12 +93,12 @@ EXCERPTS = [
   answer="“CLAUDE.md is wrong: ADR-0001 says 1 BD = 1000 fils; window.go uses Asia/Bahrain; payment-link tokens are bearer secrets. Correct CLAUDE.md first, or every AI-assisted change will start from wrong rules.”",
   verify="Read ADR-0001, window.go and paymentLinks/create.ts; reproduced the CSV parser turning “4.75” into 475 fils.",
   changed="Corrected CLAUDE.md/AGENTS.md; fixed M9, S7, O1 with new tests."),
- dict(title="2 · Earlier AI answers left in comments were false", finding="M10 (counter overflow), O3 (duplicate payout notices)",
+ dict(title="2 · Earlier AI answers left in comments were false", finding="M10 (counter overflow), O3 (duplicate payout notices), S17 (committed secret)",
   prompt="“continue with FP-300 and read this and make sure it applies to everything” (with the judging criteria)",
   context="Code comments recorded earlier AI answers: “INTEGER in PostgreSQL is 64-bit on 64-bit builds”, “outbox_events has a unique index on (event_type, aggregate_id)”.",
-  answer="Claude flagged both as unverified and checked the schema rather than trusting them.",
-  verify="Migration 0049 declares INTEGER (max 2,147,483,647 vs a 2,000,000,000 threshold); no migration creates that unique index.",
-  changed="Migrations 0073 (BIGINT) and 0077 (partial unique index) + ON CONFLICT; Go int64."),
+  answer="Claude flagged both as unverified and checked the schema rather than trusting them. Moving our work into the fork, it found a third: a Copilot answer in ops/.env.docker (‘.env matches .env.docker as a prefix’) had left a secret committed.",
+  verify="Migration 0049 declares INTEGER (max 2,147,483,647 vs a 2,000,000,000 threshold); no migration creates that unique index; git ls-files showed ops/.env.docker tracked since the first commit.",
+  changed="Migrations 0073 (BIGINT) and 0077 (partial unique index) + ON CONFLICT; Go int64; removed the committed secret (S17)."),
  dict(title="3 · The AI was wrong, and tests caught it", finding="R2 (crash mid-payment) and S6",
   prompt="“make sure it applies to everything” → crash test under load; Claude proposed marking a link paid when a capture already committed.",
   context="Full repo, Docker, the locked test suite, and the k6 crash test.",
@@ -143,8 +143,8 @@ SUB = f"""<!doctype html><html><head><meta charset="utf-8"><title>{e(T['team'])}
 
 <section class="page">
   <h2>1. Summary</h2>
-  <p><b>What we found.</b> 52 defects across money, security, settlement, reporting and UI. Seven were critical: money lost or another merchant reachable (refunding anyone's payment, logging in without the OTP or into another merchant, a payment link charged twice, payouts computed in float32, the balance button wiping a merchant to 7K, and refunded sales still paid out in full).</p>
-  <p><b>What we fixed.</b> All 52, each with the smallest change and a new test or reproduction (none of the existing locked tests edited, the audited <code>packages/money</code> untouched). We finished FP-300 (refunds) end to end: API, ledger, cumulative fee reversal, settlement netting, signed webhook, timeline, reports and reconciliation. We deployed on Dilmune Cloud within the 1 vCPU / 2 GB budget, with load shedding, restart on crash and a one-command git deploy.</p>
+  <p><b>What we found.</b> 53 defects across money, security, settlement, reporting and UI. Seven were critical: money lost or another merchant reachable (refunding anyone's payment, logging in without the OTP or into another merchant, a payment link charged twice, payouts computed in float32, the balance button wiping a merchant to 7K, and refunded sales still paid out in full).</p>
+  <p><b>What we fixed.</b> All 53, each with the smallest change and a new test or reproduction (none of the existing locked tests edited, the audited <code>packages/money</code> untouched). We finished FP-300 (refunds) end to end: API, ledger, cumulative fee reversal, settlement netting, signed webhook, timeline, reports and reconciliation. We deployed on Dilmune Cloud within the 1 vCPU / 2 GB budget, with load shedding, restart on crash and a one-command git deploy.</p>
   <p><b>What we left alone.</b> Five locked tests that assert the bugs finance reported (CSV 0.475, the 245 bps display): fixes kept, tests not edited. The March sweep postings already in production (need finance sign-off to reverse). Real OTP delivery (needs an email/SMS provider).</p>
   <p><b>Main root cause.</b> <i>Safeguards that existed only on paper.</i> ADRs, comments and CLAUDE.md asserted protections the code didn't have: a unique index, a dedupe table, a read-only role, integer money, a safe seed. Several of those claims were earlier AI answers nobody checked. Each one hid a bug that we found by reading the schema, running the system, or load-testing it.</p>
 </section>
@@ -153,7 +153,7 @@ SUB = f"""<!doctype html><html><head><meta charset="utf-8"><title>{e(T['team'])}
   <h2>2. Architecture and deployment</h2>
   <div class="arch">{e(ARCH)}</div>
   <h3>Redeploy: one command</h3>
-  <pre>ssh dilmune@143.110.242.142 'cd ~/bhash && ops/deploy.sh'</pre>
+  <pre>ssh dilmune@143.110.242.142 'cd ~/fils-pay && ops/deploy.sh'</pre>
   <p><code>ops/deploy.sh</code> does a fast-forward <code>git pull</code> of the public fork, runs migrations (compose <code>migrate</code> service), rebuilds only what changed and restarts it. Infrastructure as code: <code>ops/docker-compose.prod.yml</code>, <code>ops/Dockerfile.*</code>, <code>ops/Caddyfile</code>.</p>
   <h3>Secrets</h3>
   <p><code>ops/.env.prod</code> exists only on the server (mode 600, git-ignored), generated there with <code>openssl rand</code>: Postgres password, webhook encryption key, acquirer callback secret, settlement internal token. The repo holds only <code>ops/.env.prod.example</code>.</p>
@@ -306,7 +306,7 @@ members_s = "".join(f"<tr><td>{e(m['name'])}</td><td>{e(m['owned'])}</td></tr>" 
 SL = f"""<!doctype html><html><head><meta charset="utf-8"><title>{e(T['team'])}_FilsPay_Slides</title>{FONTS}<style>{SCSS}</style></head><body>
 <div class="s dark">{mk}<p class="k">The Handover · FilsPay</p><h1>Team {e(T['team'])}</h1>
 <table style="color:#e7e9ef"><tbody>{members_s}</tbody></table>
-<p style="margin-top:28px;color:#b7bcc8">52 bugs fixed · refunds shipped end to end · live on Dilmune Cloud</p>
+<p style="margin-top:28px;color:#b7bcc8">53 bugs fixed · refunds shipped end to end · live on Dilmune Cloud</p>
 <div class="foot mono">{T['site']} · {T['fork']}</div></div>
 
 <div class="s">{mk}<p class="k">1 · Root cause</p><h2>Safeguards that existed only on paper</h2>

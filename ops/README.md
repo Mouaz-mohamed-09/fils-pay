@@ -82,12 +82,12 @@ exposed, TLS and the built dashboards served by Caddy (`Dockerfile.gateway`,
 First time on a new server:
 
 ```
-git clone https://github.com/Mouaz-mohamed-09/bhash-handover.git bhash && cd bhash
+git clone https://github.com/Mouaz-mohamed-09/fils-pay.git fils-pay && cd fils-pay
 cp ops/.env.prod.example ops/.env.prod      # fill in secrets and domains
 ops/deploy.sh
 ```
 
-Every later deploy: push to `main`, then on the server `cd ~/bhash && ops/deploy.sh`
+Every later deploy: push to `main`, then on the server `cd ~/fils-pay && ops/deploy.sh`
 (fast-forward pull, rebuild, migrate, restart; data survives in the volume).
 
 Point DNS for `SITE_DOMAIN` and `ADMIN_DOMAIN` at the server first; Caddy
