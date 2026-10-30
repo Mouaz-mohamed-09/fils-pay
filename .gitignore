@@ -8,3 +8,4 @@ npm-debug.log*
 .claude/
 ops/.env.docker
 ops/.env.prod
+docs/submission/*.pdf

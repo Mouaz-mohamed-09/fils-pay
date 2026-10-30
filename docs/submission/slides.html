@@ -1,0 +1,96 @@
+<!doctype html><html><head><meta charset="utf-8"><title>BHASH_FilsPay_Slides</title><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@700;800&family=IBM+Plex+Sans:wght@400;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap"><style>
+@page { size: 1280px 720px; margin: 0; }
+* { box-sizing: border-box; }
+body { margin: 0; font-family: "IBM Plex Sans", Arial, sans-serif; color: #1f2430; }
+.s { width: 1280px; height: 720px; padding: 56px 72px; page-break-after: always; position: relative; overflow: hidden; background: #fff; }
+.s.dark { background: #12151d; color: #e7e9ef; }
+.k { color: #c8102e; font-size: 15px; letter-spacing: 0.16em; text-transform: uppercase; font-weight: 700; margin: 0 0 10px; }
+h1 { font-family: "Archivo", Arial, sans-serif; font-size: 58px; line-height: 1.02; letter-spacing: -0.02em; margin: 0 0 22px; color: #12151d; }
+.dark h1 { color: #fff; }
+h2 { font-family: "Archivo", Arial, sans-serif; font-size: 40px; margin: 0 0 22px; letter-spacing: -0.015em; color: #12151d; }
+.dark h2 { color: #fff; }
+p, li { font-size: 21px; line-height: 1.4; }
+ul { padding-left: 24px; margin: 0; } li { margin-bottom: 9px; }
+table { border-collapse: collapse; width: 100%; font-size: 17px; }
+th, td { border-bottom: 1px solid #dcdfe6; padding: 8px 10px; text-align: left; vertical-align: top; }
+th { font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: #646b7a; }
+.mono { font-family: "IBM Plex Mono", Menlo, monospace; }
+.mark { position: absolute; top: 56px; right: 72px; font-family: "Archivo", Arial; font-weight: 800; font-size: 20px; display: flex; gap: 8px; align-items: center; }
+.mark i { width: 20px; height: 20px; background: #c8102e; display: inline-block; border-radius: 3px; }
+.dark .mark { color: #fff; }
+.big { font-family: "Archivo", Arial; font-size: 30px; line-height: 1.25; color: #12151d; margin: 0 0 20px; }
+.row { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
+.card { border: 1px solid #dcdfe6; border-radius: 10px; padding: 16px 20px; }
+.card b { color: #a00c24; }
+.shot img { width: 100%; border: 1px solid #dcdfe6; border-radius: 6px; max-height: 470px; object-fit: cover; object-position: top; }
+.cap { font-size: 14px; color: #646b7a; }
+.foot { position: absolute; bottom: 30px; left: 72px; right: 72px; font-size: 14px; color: #8a90a0; }
+.app pre { font-family: "IBM Plex Mono", Menlo, monospace; font-size: 13px; background: #f6f7f9; border: 1px solid #dcdfe6; padding: 12px; white-space: pre-wrap; margin: 0 0 12px; }
+</style></head><body>
+<div class="s dark"><div class="mark"><i></i>FilsPay</div><p class="k">The Handover · FilsPay</p><h1>Team BHASH</h1>
+<table style="color:#e7e9ef"><tbody><tr><td>Mouaz Mohamed (Mouaz-mohamed-09)</td><td>TO FILL IN</td></tr><tr><td>Salshamarii</td><td>TO FILL IN</td></tr><tr><td>MJ5-byte</td><td>TO FILL IN</td></tr></tbody></table>
+<p style="margin-top:28px;color:#b7bcc8">52 bugs fixed · refunds shipped end to end · live on Dilmune Cloud</p>
+<div class="foot mono">https://143-110-242-142.sslip.io · https://github.com/Mouaz-mohamed-09/bhash-handover</div></div>
+
+<div class="s"><div class="mark"><i></i>FilsPay</div><p class="k">1 · Root cause</p><h2>Safeguards that existed only on paper</h2>
+<p class="big">ADRs, comments and CLAUDE.md promised protections the code never had. Several were earlier AI answers nobody checked.</p>
+<table><thead><tr><th>Promised</th><th>Reality</th><th>Symptom it explains</th></tr></thead><tbody>
+<tr><td>“unique index on outbox events”</td><td>no index</td><td>duplicate payout notices (08-21)</td></tr>
+<tr><td>“processed_events dedupes callbacks”</td><td>table doesn't exist</td><td>duplicate notes (FP-201)</td></tr>
+<tr><td>“INTEGER is 64-bit”</td><td>32-bit</td><td>volume counter overflow</td></tr>
+<tr><td>“impersonation is read-only”</td><td>super_admin = owner</td><td>admins writing as merchants</td></tr>
+<tr><td>“money is cents” (CLAUDE.md)</td><td>BD has 3 decimals</td><td>CSV 4.75 BD → 0.475</td></tr></tbody></table></div>
+
+<div class="s"><div class="mark"><i></i>FilsPay</div><p class="k">2 · Key findings, by impact</p><h2>What could lose money</h2>
+<div class="row">
+<div class="card"><b>Refund anyone's payment, and more than captured</b><br>Lookup by ID only; limit = authorized. Test: other merchant → 404, nothing refunded.</div>
+<div class="card"><b>Refunded sales still paid out in full</b><br>Settlement ignored refunds. Now netted: batch 3,750 / 84 / 3,666.</div>
+<div class="card"><b>Login without OTP, or into another merchant</b><br>View had no “verified” filter; session by email. Reproduced, fixed, tested.</div>
+<div class="card"><b>Link charged twice; crash mid-payment</b><br>Reservations had no owner. kill -9 under load: 0 double charges after the fix.</div>
+</div></div>
+
+<div class="s"><div class="mark"><i></i>FilsPay</div><p class="k">3 · Fixes and proof</p><h2>Each fix is structural, and proven</h2>
+<table><thead><tr><th>Fix</th><th>Proof</th></tr></thead><tbody>
+<tr><td>Row lock across the refund</td><td>3 simultaneous refunds → exactly 1 succeeds</td></tr>
+<tr><td>Cumulative fee reversal</td><td>Live: 83 + 167 = 250 = fee charged</td></tr>
+<tr><td>Integer fils, single rounding</td><td>4,755 fils → “4.75” in the scheme file (was 4.76)</td></tr>
+<tr><td>Indexes on the ledger trigger</td><td>Seq scans 27,430 → 0; p95 3.35 s → 780 ms</td></tr>
+<tr><td>Same fee formula as settlement</td><td>Live reconciliation gap: 0 fils</td></tr>
+<tr><td>Signed bytes = sent bytes</td><td>Webhook verified against a real receiver</td></tr>
+</tbody></table>
+<p class="cap" style="margin-top:14px">441 TypeScript tests + 7 Go packages pass; the only 5 failures are locked tests that assert reported bugs.</p></div>
+
+<div class="s"><div class="mark"><i></i>FilsPay</div><p class="k">4 · Live demo: full and partial refund</p><h2>Refunds end to end</h2>
+<div class="row"><div class="shot"><img src="img/after-desktop-04-transaction-detail.jpg"><p class="cap">Partial refunds: refunded amount and timeline in the dashboard</p></div>
+<div><table><thead><tr><th>Live 10.000 BD payment</th><th>Fils</th></tr></thead><tbody>
+<tr><td>Capture, fee 2.50%</td><td>10,000 / 250</td></tr><tr><td>Partial refund 3.333 BD</td><td>−3,333 (fee −83)</td></tr>
+<tr><td>Full remainder 6.667 BD</td><td>−6,667 (fee −167)</td></tr><tr><td>Merchant payable after</td><td><b>0</b></td></tr></tbody></table>
+<p style="font-size:17px;margin-top:14px">Settlement report, batch 2026-10-29:<br><span class="mono">gross 3,750 · fee 84 · net 3,666</span></p></div></div></div>
+
+<div class="s"><div class="mark"><i></i>FilsPay</div><p class="k">5 · Under load</p><h2>1 vCPU / 2 GB, live</h2>
+<div class="row"><div><p><b>Estimate:</b> ~10 checkouts/s sustained, ~16 ceiling.</p>
+<table><thead><tr><th>Offered/s</th><th>Done/s</th><th>p95</th><th>Correct</th></tr></thead><tbody>
+<tr><td>10</td><td>8.7</td><td>1.76 s</td><td>100%</td></tr><tr><td>14</td><td>12.0</td><td>2.86 s</td><td>100%</td></tr><tr><td>20</td><td>16.3</td><td>3.3 s</td><td>100%</td></tr></tbody></table></div>
+<div><ul><li>Caddy (TLS) → API 0.5 vCPU → Postgres; only 80/443/22 open</li><li>Bottleneck: Postgres CPU, then the pool</li><li>Overload: instant 503 + Retry-After past 64 in flight</li><li>kill -9 under load: auto-restart, 0 double charges</li></ul></div></div></div>
+
+<div class="s"><div class="mark"><i></i>FilsPay</div><p class="k">6 · How we used AI</p><h2>Claude Code, checked by tests</h2>
+<p class="big">Setup: CLAUDE.md (corrected) + permission rules + /test-all /deploy /smoke /finding commands.</p>
+<div class="card"><b>When it was wrong:</b> its first crash fix made a buyer's retry return 409. The locked test caught it: <span class="mono">not ok 304 … expected 200, actual 409</span>. We changed the fix to replay the original payment for the same key, and the crash test then showed 0 double charges.</div>
+<p style="margin-top:18px">Also caught: CLAUDE.md told the AI money was cents and UTC; earlier AI answers in comments (“INTEGER is 64-bit”) were false.</p></div>
+
+<div class="s"><div class="mark"><i></i>FilsPay</div><p class="k">7 · Decisions and open risks</p><h2>What we chose not to change</h2>
+<ul><li><b>5 locked tests</b> assert reported bugs: fixes kept, tests not edited</li>
+<li><b>March sweep</b> in production: not reversed without finance sign-off</li>
+<li><b>OTP on screen</b> in the demo: no email/SMS gateway exists yet</li>
+<li><b>Historic data</b> (scheme over-reporting, 10× CSV imports): needs reviewed adjustments</li>
+<li><b>Callback freshness window</b>: blocked by a locked test; dedupe makes replays harmless</li></ul></div>
+
+<div class="s app"><div class="mark"><i></i>FilsPay</div><p class="k">Appendix</p><h2>Evidence</h2>
+<pre>ops/test-all.sh   api 374 pass / 5 locked-test fails · reporting 11/11 · web 8/8 · money 40/40 · events 4/4 · Go 7/7 packages
+R1 ledger scans   before seq_scan 27,430 (376M rows) · after 0 (idx_scan 10,068)
+Crash audit       unbalanced groups 0 · paid links w/o capture 0 · stuck keys 0 · double charges 0
+Reconciliation    2026-10-29..30: ledger 3,666 = settled 3,666 + pending 0 → gap 0</pre>
+<div class="row"><div class="shot"><img src="img/before-desktop-01-checkout.jpg" style="max-height:250px"><p class="cap">Checkout before</p></div>
+<div class="shot"><img src="img/after-desktop-01-checkout.jpg" style="max-height:250px"><p class="cap">Checkout after</p></div></div>
+<p class="cap">Full findings: docs/AUDIT.md · capacity: docs/CAPACITY.md · UI: docs/UI_EVIDENCE.md · repo https://github.com/Mouaz-mohamed-09/bhash-handover</p></div>
+</body></html>
