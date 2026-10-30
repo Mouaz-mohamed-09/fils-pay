@@ -12,6 +12,16 @@ cd "$(dirname "$0")/.."
 
 [ -f ops/.env.prod ] || { echo "ops/.env.prod missing: copy ops/.env.prod.example and fill it in" >&2; exit 1; }
 
+# Don't redeploy during the nightly settlement close (00:00-01:00 Asia/Bahrain,
+# UTC+3): the daemon closes the previous day 15 minutes after midnight.
+# FORCE=1 overrides; even then the 2-minute stop grace period lets an
+# in-flight batch finish, and batches are idempotent if one is cut short.
+bahrain_hour=$(TZ=Asia/Bahrain date +%H)
+if [ "$bahrain_hour" = "00" ] && [ "${FORCE:-0}" != "1" ]; then
+  echo "refusing to deploy between 00:00 and 01:00 Bahrain time (settlement close window); retry later or FORCE=1" >&2
+  exit 1
+fi
+
 git pull --ff-only origin main
 echo "deploying $(git log --oneline -1)"
 

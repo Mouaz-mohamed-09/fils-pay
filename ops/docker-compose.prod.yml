@@ -101,6 +101,11 @@ services:
       dockerfile: ops/Dockerfile.go
     env_file: .env.prod
     restart: unless-stopped
+    # On redeploy Docker sends SIGTERM; the daemon cancels its context and lets
+    # the in-flight batch transaction commit or roll back. Give it time to do so
+    # instead of the default 10 s before SIGKILL. CloseBatch/PayoutBatch are
+    # idempotent, so a rolled-back batch is simply redone on the next tick.
+    stop_grace_period: 2m
     depends_on:
       postgres:
         condition: service_healthy
